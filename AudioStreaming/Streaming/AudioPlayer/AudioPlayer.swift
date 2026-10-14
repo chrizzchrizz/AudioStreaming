@@ -1091,6 +1091,8 @@ extension AudioPlayer: AudioStreamSourceDelegate {
             Logger.debug("Failed to flush remaining packets at EOF: \(flushStatus)", category: .generic)
         }
 
+        fileStreamProcessor.trimTrailingGaplessPadding()
+
         readingEntry.lock.lock()
         readingEntry.framesState.lastFrameQueued = readingEntry.framesState.queued
         readingEntry.lock.unlock()

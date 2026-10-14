@@ -100,6 +100,7 @@ class AudioEntry {
         framesState.played = 0
         framesState.queued = 0
         framesState.lastFrameQueued = -1
+        framesState.decoded = 0
     }
 
     func has(same source: CoreAudioStreamSource) -> Bool {
