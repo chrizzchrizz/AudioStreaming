@@ -209,10 +209,7 @@ final class AudioFileStreamProcessor {
             AudioConverterReset(converted)
         }
 
-        readingEntry.reset()
-        readingEntry.lock.lock()
-        readingEntry.framesState.decoded = nil
-        readingEntry.lock.unlock()
+        readingEntry.reset(decodedPositionExact: false)
         readingEntry.seek(at: Int(seekByteOffset))
         rendererContext.waitingForDataAfterSeekFrameCount.write { $0 = 0 }
         playerContext.setInternalState(to: .waitingForDataAfterSeek)
@@ -437,6 +434,11 @@ final class AudioFileStreamProcessor {
             entry.framesState.primingFrames = Int(pti.mPrimingFrames)
             entry.framesState.validFrames = Int(pti.mNumberValidFrames)
             entry.framesState.remainderFrames = Int(pti.mRemainderFrames)
+            // Frames decoded before this info arrived were kept untrimmed, so the decoded position can't
+            // be used to trim the start; fall back to dropping only the padding at the end of the stream.
+            if let decoded = entry.framesState.decoded, decoded > 0 {
+                entry.framesState.decoded = nil
+            }
         }
     }
 
@@ -635,6 +637,8 @@ final class AudioFileStreamProcessor {
                     fileStreamCallback?(.raiseError(.codecError))
                     return
                 }
+                // the requested frames were all filled: account for them before decoding more
+                fillUsedFrames(framesCount: framesAdded)
             } else {
                 var framesAdded: UInt32 = 0
                 var framesToDecode: UInt32 = start - end
@@ -666,6 +670,8 @@ final class AudioFileStreamProcessor {
                     fileStreamCallback?(.raiseError(.codecError))
                     return
                 }
+                // the requested frames were all filled: account for them before decoding more
+                fillUsedFrames(framesCount: framesAdded)
             }
         }
     }
@@ -713,14 +719,11 @@ final class AudioFileStreamProcessor {
 
         guard let decodedStart, let validFrames, sourceSampleRate > 0 else { return framesCount }
         let ratio = outputAudioFormat.mSampleRate / sourceSampleRate
-        let keepFrom = Int((Double(primingFrames) * ratio).rounded())
-        let keepTo = keepFrom + Int((Double(validFrames) * ratio).rounded())
-        let first = max(decodedStart, keepFrom)
-        let last = min(decodedStart + Int(framesCount), keepTo)
-        guard last > first else { return 0 }
-
-        let leadingFrames = first - decodedStart
-        let keptFrames = last - first
+        let (leadingFrames, keptFrames) = GaplessTrim.keptRange(
+            decodedStart: decodedStart, framesCount: Int(framesCount),
+            primingFrames: primingFrames, validFrames: validFrames, ratio: ratio
+        )
+        guard keptFrames > 0 else { return 0 }
         if leadingFrames > 0, let mData = rendererContext.audioBuffer.mData {
             let frameSize = Int(rendererContext.bufferContext.sizeInBytes)
             let destination = mData + Int(bufferIndex) * frameSize
@@ -733,8 +736,9 @@ final class AudioFileStreamProcessor {
     /// because the decoded position is not exact after a seek.
     /// Must be called once all packets of the reading entry have been decoded: the padding is the
     /// last part written to the renderer buffer then.
-    func trimTrailingGaplessPadding() {
-        guard let entry = playerContext.audioReadingEntry else { return }
+    ///
+    /// - parameter entry: The entry whose stream just ended
+    func trimTrailingGaplessPadding(for entry: AudioEntry) {
         // same lock order as the renderer: buffer first, then entry
         rendererContext.lock.lock(); defer { rendererContext.lock.unlock() }
         entry.lock.lock(); defer { entry.lock.unlock() }
@@ -742,9 +746,12 @@ final class AudioFileStreamProcessor {
         let framesState = entry.framesState
         let sourceSampleRate = entry.audioStreamFormat.mSampleRate
         guard framesState.decoded == nil, framesState.remainderFrames > 0, sourceSampleRate > 0 else { return }
-        let outputRemainderFrames = Int((Double(framesState.remainderFrames) * outputAudioFormat.mSampleRate / sourceSampleRate).rounded())
-        let notPlayedFrames = framesState.queued - framesState.played
-        let droppedFrames = min(outputRemainderFrames, notPlayedFrames, Int(rendererContext.bufferContext.frameUsedCount))
+        let droppedFrames = GaplessTrim.trailingFramesToDrop(
+            remainderFrames: framesState.remainderFrames,
+            ratio: outputAudioFormat.mSampleRate / sourceSampleRate,
+            notPlayedFrames: framesState.queued - framesState.played,
+            usedFrames: Int(rendererContext.bufferContext.frameUsedCount)
+        )
         guard droppedFrames > 0 else { return }
 
         rendererContext.bufferContext.frameUsedCount -= UInt32(droppedFrames)

@@ -20,3 +20,26 @@ final class EntryFramesState {
     /// nil after a seek, where the decoded position is not exact.
     var decoded: Int? = 0
 }
+
+/// Pure gapless trimming math, in output frames.
+enum GaplessTrim {
+    /// The part of a decoded chunk to keep.
+    /// - parameter decodedStart: Output frames decoded before this chunk
+    /// - parameter framesCount: Frames in this chunk
+    /// - parameter ratio: Output sample rate / source sample rate
+    /// - Returns: The frames to skip at the start of the chunk and the frames to keep after them
+    static func keptRange(decodedStart: Int, framesCount: Int, primingFrames: Int, validFrames: Int, ratio: Double) -> (leading: Int, kept: Int) {
+        let keepFrom = Int((Double(primingFrames) * ratio).rounded())
+        let keepTo = keepFrom + Int((Double(validFrames) * ratio).rounded())
+        let first = max(decodedStart, keepFrom)
+        let last = min(decodedStart + framesCount, keepTo)
+        guard last > first else { return (0, 0) }
+        return (first - decodedStart, last - first)
+    }
+
+    /// The output frames of end padding to drop, limited to what is still unplayed and buffered.
+    static func trailingFramesToDrop(remainderFrames: Int, ratio: Double, notPlayedFrames: Int, usedFrames: Int) -> Int {
+        let outputRemainder = Int((Double(remainderFrames) * ratio).rounded())
+        return max(0, min(outputRemainder, notPlayedFrames, usedFrames))
+    }
+}
