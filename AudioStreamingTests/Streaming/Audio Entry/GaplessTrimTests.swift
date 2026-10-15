@@ -61,6 +61,19 @@ class GaplessTrimTests: XCTestCase {
         XCTAssertEqual(r.kept, 4354)
     }
 
+    func test_Kept_Frames_Over_Chunks_Match_Rounded_End_With_Ratio() {
+        let ratio = 48000.0 / 44100.0
+        var decoded = 0
+        var total = 0
+        for count in [1000, 1024, 777, 4096, 1, 9000, 1024] {
+            let r = range(decoded, count, priming: 1105, valid: 7003, ratio: ratio)
+            total += r.kept
+            decoded += count
+        }
+        // keepFrom = round(1105 * ratio), keepTo = round(8108 * ratio)
+        XCTAssertEqual(total, Int((8108 * ratio).rounded()) - Int((1105 * ratio).rounded()))
+    }
+
     func test_Trailing_Drop_Is_Limited_By_Unplayed_And_Used_Frames() {
         XCTAssertEqual(GaplessTrim.trailingFramesToDrop(remainderFrames: 500, ratio: 1, notPlayedFrames: 10000, usedFrames: 10000), 500)
         XCTAssertEqual(GaplessTrim.trailingFramesToDrop(remainderFrames: 500, ratio: 1, notPlayedFrames: 200, usedFrames: 10000), 200)

@@ -209,7 +209,9 @@ final class AudioFileStreamProcessor {
             AudioConverterReset(converted)
         }
 
-        readingEntry.reset(decodedPositionExact: false)
+        // seeking to the start of the data re-decodes the encoder delay, so the decoded position stays exact
+        let seeksToStart = seekByteOffset <= Int64(readingEntry.audioStreamState.dataOffset)
+        readingEntry.reset(decodedPositionExact: seeksToStart)
         readingEntry.seek(at: Int(seekByteOffset))
         rendererContext.waitingForDataAfterSeekFrameCount.write { $0 = 0 }
         playerContext.setInternalState(to: .waitingForDataAfterSeek)
@@ -429,7 +431,8 @@ final class AudioFileStreamProcessor {
         guard status == noErr else { return }
         // Use valid frames to refine duration if present
         entry.lock.lock(); defer { entry.lock.unlock() }
-        if pti.mNumberValidFrames > 0 {
+        // the property can be reported again after a seek; keep the values from the first report
+        if pti.mNumberValidFrames > 0, entry.framesState.validFrames == nil {
             entry.audioStreamState.dataPacketCount = Double(pti.mNumberValidFrames) / Double(max(1, entry.audioStreamFormat.mFramesPerPacket))
             entry.framesState.primingFrames = Int(pti.mPrimingFrames)
             entry.framesState.validFrames = Int(pti.mNumberValidFrames)

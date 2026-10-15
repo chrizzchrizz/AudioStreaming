@@ -30,7 +30,7 @@ enum GaplessTrim {
     /// - Returns: The frames to skip at the start of the chunk and the frames to keep after them
     static func keptRange(decodedStart: Int, framesCount: Int, primingFrames: Int, validFrames: Int, ratio: Double) -> (leading: Int, kept: Int) {
         let keepFrom = Int((Double(primingFrames) * ratio).rounded())
-        let keepTo = keepFrom + Int((Double(validFrames) * ratio).rounded())
+        let keepTo = Int((Double(primingFrames + validFrames) * ratio).rounded())
         let first = max(decodedStart, keepFrom)
         let last = min(decodedStart + framesCount, keepTo)
         guard last > first else { return (0, 0) }
