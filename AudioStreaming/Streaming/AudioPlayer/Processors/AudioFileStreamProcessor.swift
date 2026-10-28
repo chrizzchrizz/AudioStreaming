@@ -359,6 +359,13 @@ final class AudioFileStreamProcessor {
                 entry.audioStreamFormat = audioStreamFormat
             }
 
+            // the packet table info (if any) is applied when it is reported and replaces this
+            if entry.framesState.validFrames == nil, entry.framesState.primingFrames == 0 {
+                entry.framesState.primingFrames = GaplessTrim.assumedPrimingFrames(
+                    formatID: audioStreamFormat.mFormatID, sourceLength: entry.length, hasPacketTableInfo: false
+                )
+            }
+
             entry.sampleRate = Float(audioStreamFormat.mSampleRate)
             entry.packetDuration = Double(audioStreamFormat.mFramesPerPacket) / Double(entry.sampleRate)
 
@@ -716,7 +723,8 @@ final class AudioFileStreamProcessor {
             framesState.decoded = decodedStart + Int(framesCount)
         }
         let primingFrames = framesState.primingFrames
-        let validFrames = framesState.validFrames
+        // without packet table info only the assumed priming at the start is dropped
+        let validFrames = framesState.validFrames ?? (primingFrames > 0 ? Int(Int32.max) : nil)
         let sourceSampleRate = entry.audioStreamFormat.mSampleRate
         entry.lock.unlock()
 
