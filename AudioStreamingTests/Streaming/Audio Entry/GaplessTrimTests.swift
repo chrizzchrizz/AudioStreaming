@@ -3,6 +3,7 @@
 //  AudioStreamingTests
 //
 
+import AudioToolbox
 import XCTest
 @testable import AudioStreaming
 
@@ -83,5 +84,55 @@ class GaplessTrimTests: XCTestCase {
 
     func test_Trailing_Drop_Scales_With_Ratio() {
         XCTAssertEqual(GaplessTrim.trailingFramesToDrop(remainderFrames: 1000, ratio: 2, notPlayedFrames: 5000, usedFrames: 5000), 2000)
+    }
+
+    func test_Assumed_Priming_For_Mp3_Without_Packet_Table_Info() {
+        XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEGLayer3, hasPacketTableInfo: false), 576)
+    }
+
+    func test_No_Assumed_Priming_For_Mp3_With_Packet_Table_Info() {
+        XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEGLayer3, hasPacketTableInfo: true), 0)
+    }
+
+    func test_No_Assumed_Priming_For_Other_Formats() {
+        XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEG4AAC, hasPacketTableInfo: false), 0)
+    }
+
+    func test_Trailing_Silent_Frames_Counts_Until_Signal() {
+        let samples: [Float] = [0.5, 0.4, 0, 0.0005, 0, 0] // oldest to newest
+        let count = GaplessTrim.trailingSilentFrames(limit: 100, referenceFrames: 0) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, 4)
+    }
+
+    func test_Trailing_Silent_Frames_Is_Limited() {
+        let count = GaplessTrim.trailingSilentFrames(limit: 3, referenceFrames: 0) { _ in 0 }
+        XCTAssertEqual(count, 3)
+    }
+
+    func test_Trailing_Silent_Frames_Zero_For_Signal_At_End() {
+        let count = GaplessTrim.trailingSilentFrames(limit: 100, referenceFrames: 0) { _ in 0.2 }
+        XCTAssertEqual(count, 0)
+    }
+
+    func test_Trailing_Decay_Is_Dropped_Relative_To_Loud_Music() {
+        // loud music (0.5), then a decaying tail below 2 % of it
+        let samples: [Float] = Array(repeating: 0.5, count: 50) + [0.008, 0.006, 0.004, 0.003]
+        let count = GaplessTrim.trailingSilentFrames(limit: 4, referenceFrames: 40) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, 4)
+    }
+
+    func test_Trailing_Quiet_Music_Is_Kept() {
+        // quiet music (0.02): 2 % of it is below the minimum, so only really silent frames are dropped
+        let samples: [Float] = Array(repeating: 0.02, count: 50) + [0.004, 0.004]
+        let count = GaplessTrim.trailingSilentFrames(limit: 2, referenceFrames: 40) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, 0)
+    }
+
+    func test_Ringing_After_An_Abrupt_Music_End_Is_Dropped() {
+        // music at 0.4, then the ringing of the codec at about 0.04 and a noise floor, as measured on a live stream
+        let tail: [Float] = [0.044, 0.010, 0.041, 0.010, 0.036, 0.024, 0.006, 0.004]
+        let samples: [Float] = Array(repeating: 0.4, count: 50) + tail
+        let count = GaplessTrim.trailingSilentFrames(limit: 20, referenceFrames: 30) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, tail.count)
     }
 }

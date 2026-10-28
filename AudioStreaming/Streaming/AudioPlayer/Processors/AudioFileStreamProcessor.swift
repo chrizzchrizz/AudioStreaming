@@ -308,6 +308,7 @@ final class AudioFileStreamProcessor {
             assignMagicCookieToConverterIfNeeded()
             processPacketUpperBoundAndMaxPacketSize(entry: entry, fileStream: fileStream)
             processReadyToProducePackets(entry: entry, fileStream: fileStream)
+            applyAssumedPrimingIfNeeded(entry: entry)
         case kAudioFileStreamProperty_FormatList:
             processFormatList(entry: entry, fileStream: fileStream)
         case kAudioFileStreamProperty_PacketTableInfo:
@@ -421,6 +422,17 @@ final class AudioFileStreamProcessor {
         guard status == noErr else { return }
         entry.lock.lock(); defer { entry.lock.unlock() }
         entry.audioStreamState.bitRate = Double(bitRate)
+    }
+
+    /// An MP3 without packet table info (no Xing/Info header, e.g. a transcode of a server or a file
+    /// of a simple encoder) has the encoder delay of LAME at its start. The packet table info of a file
+    /// with header is reported before the stream is ready to produce packets and takes precedence.
+    private func applyAssumedPrimingIfNeeded(entry: AudioEntry) {
+        entry.lock.lock(); defer { entry.lock.unlock() }
+        guard entry.framesState.validFrames == nil, entry.framesState.primingFrames == 0 else { return }
+        entry.framesState.primingFrames = GaplessTrim.assumedPrimingFrames(
+            formatID: entry.audioStreamFormat.mFormatID, hasPacketTableInfo: false
+        )
     }
 
     private func processPacketTableInfo(entry: AudioEntry, fileStream: AudioFileStreamID) {
@@ -716,7 +728,8 @@ final class AudioFileStreamProcessor {
             framesState.decoded = decodedStart + Int(framesCount)
         }
         let primingFrames = framesState.primingFrames
-        let validFrames = framesState.validFrames
+        // without packet table info only the assumed priming at the start is dropped
+        let validFrames = framesState.validFrames ?? (primingFrames > 0 ? Int(Int32.max) : nil)
         let sourceSampleRate = entry.audioStreamFormat.mSampleRate
         entry.lock.unlock()
 
@@ -748,17 +761,56 @@ final class AudioFileStreamProcessor {
 
         let framesState = entry.framesState
         let sourceSampleRate = entry.audioStreamFormat.mSampleRate
-        guard framesState.decoded == nil, framesState.remainderFrames > 0, sourceSampleRate > 0 else { return }
-        let droppedFrames = GaplessTrim.trailingFramesToDrop(
-            remainderFrames: framesState.remainderFrames,
-            ratio: outputAudioFormat.mSampleRate / sourceSampleRate,
-            notPlayedFrames: framesState.queued - framesState.played,
-            usedFrames: Int(rendererContext.bufferContext.frameUsedCount)
-        )
+        guard sourceSampleRate > 0 else { return }
+        let ratio = outputAudioFormat.mSampleRate / sourceSampleRate
+        let notPlayedFrames = framesState.queued - framesState.played
+        let usedFrames = Int(rendererContext.bufferContext.frameUsedCount)
+        let droppedFrames: Int
+        if framesState.remainderFrames > 0 {
+            guard framesState.decoded == nil else { return }
+            droppedFrames = GaplessTrim.trailingFramesToDrop(
+                remainderFrames: framesState.remainderFrames,
+                ratio: ratio,
+                notPlayedFrames: notPlayedFrames,
+                usedFrames: usedFrames
+            )
+        } else if framesState.validFrames == nil, framesState.primingFrames > 0 {
+            // padding of an MP3 without packet table info is unknown: drop the silence at the end
+            let limit = max(0, min(
+                Int((Double(GaplessTrim.maxAssumedMp3PaddingFrames) * ratio).rounded()),
+                notPlayedFrames,
+                usedFrames
+            ))
+            droppedFrames = trailingSilentFrames(limit: limit, usedFrames: usedFrames)
+        } else {
+            return
+        }
         guard droppedFrames > 0 else { return }
 
         rendererContext.bufferContext.frameUsedCount -= UInt32(droppedFrames)
         framesState.queued -= droppedFrames
+    }
+
+    /// Counts the silent frames at the end of the used renderer buffer.
+    /// The renderer buffer holds interleaved 32 bit float frames (the canonical output format of the player).
+    /// Must be called with the renderer lock held.
+    private func trailingSilentFrames(limit: Int, usedFrames: Int) -> Int {
+        guard limit > 0, let mData = rendererContext.audioBuffer.mData else { return 0 }
+        let bufferContext = rendererContext.bufferContext
+        let total = Int(bufferContext.totalFrameCount)
+        let end = Int(bufferContext.end)
+        let channels = max(1, Int(outputAudioFormat.mChannelsPerFrame))
+        let samples = mData.assumingMemoryBound(to: Float.self)
+        // the music level comes from the frames before the ones that may be dropped
+        let referenceFrames = max(0, min(4096, usedFrames - limit))
+        return GaplessTrim.trailingSilentFrames(limit: limit, referenceFrames: referenceFrames) { n in
+            let frame = (end - 1 - n + total) % total
+            var peak: Float = 0
+            for channel in 0 ..< channels {
+                peak = max(peak, abs(samples[frame * channels + channel]))
+            }
+            return peak
+        }
     }
 
     /// Advances the processed frames for buffer and reading entry
