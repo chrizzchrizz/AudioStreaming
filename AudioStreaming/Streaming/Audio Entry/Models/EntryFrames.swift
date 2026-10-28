@@ -51,6 +51,23 @@ enum GaplessTrim {
         return lameMp3PrimingFrames
     }
 
+    /// The most end padding an MP3 encoder adds (one frame plus the encoder delay), in source frames.
+    static let maxAssumedMp3PaddingFrames = 1152 + 576
+
+    /// Below this peak level (about -60 dBFS) a frame counts as the silent padding of the encoder.
+    static let paddingSilenceThreshold: Float = 0.001
+
+    /// The silent frames at the end of a stream without padding info, to be dropped as padding.
+    /// - parameter peakFromEnd: The peak level of the frame `n` frames before the end (0 is the last frame)
+    /// - parameter limit: The most frames to drop
+    static func trailingSilentFrames(limit: Int, peakFromEnd: (Int) -> Float) -> Int {
+        var count = 0
+        while count < limit, peakFromEnd(count) < paddingSilenceThreshold {
+            count += 1
+        }
+        return count
+    }
+
     /// The output frames of end padding to drop, limited to what is still unplayed and buffered.
     static func trailingFramesToDrop(remainderFrames: Int, ratio: Double, notPlayedFrames: Int, usedFrames: Int) -> Int {
         let outputRemainder = Int((Double(remainderFrames) * ratio).rounded())
