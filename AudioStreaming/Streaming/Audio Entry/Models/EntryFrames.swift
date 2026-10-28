@@ -3,6 +3,7 @@
 //  Copyright © 2020 Decimal. All rights reserved.
 //
 
+import AudioToolbox
 import Foundation
 
 final class EntryFramesState {
@@ -35,6 +36,19 @@ enum GaplessTrim {
         let last = min(decodedStart + framesCount, keepTo)
         guard last > first else { return (0, 0) }
         return (first - decodedStart, last - first)
+    }
+
+    /// Encoder delay of LAME, also used by ffmpeg's libmp3lame. The decoder delay (529) is already
+    /// compensated by the AudioToolbox MP3 decoder.
+    static let lameMp3PrimingFrames = 576
+
+    /// The priming frames to assume for a stream without packet table info.
+    /// A live MP3 stream (no length, e.g. transcoded by the server on the fly) has no Xing/Info header,
+    /// so the decoder outputs the encoder delay as silence. MP3 files with a known length keep their
+    /// untrimmed behavior since their encoder is unknown.
+    static func assumedPrimingFrames(formatID: AudioFormatID, sourceLength: Int, hasPacketTableInfo: Bool) -> Int {
+        guard !hasPacketTableInfo, sourceLength <= 0, formatID == kAudioFormatMPEGLayer3 else { return 0 }
+        return lameMp3PrimingFrames
     }
 
     /// The output frames of end padding to drop, limited to what is still unplayed and buffered.

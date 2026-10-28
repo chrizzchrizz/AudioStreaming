@@ -3,6 +3,7 @@
 //  AudioStreamingTests
 //
 
+import AudioToolbox
 import XCTest
 @testable import AudioStreaming
 
@@ -83,5 +84,21 @@ class GaplessTrimTests: XCTestCase {
 
     func test_Trailing_Drop_Scales_With_Ratio() {
         XCTAssertEqual(GaplessTrim.trailingFramesToDrop(remainderFrames: 1000, ratio: 2, notPlayedFrames: 5000, usedFrames: 5000), 2000)
+    }
+
+    func test_Assumed_Priming_For_Live_Mp3() {
+        XCTAssertEqual(
+            GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEGLayer3, sourceLength: 0, hasPacketTableInfo: false),
+            576
+        )
+    }
+
+    func test_No_Assumed_Priming_For_Mp3_With_Length_Or_Packet_Table_Info() {
+        XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEGLayer3, sourceLength: 5_000_000, hasPacketTableInfo: false), 0)
+        XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEGLayer3, sourceLength: 0, hasPacketTableInfo: true), 0)
+    }
+
+    func test_No_Assumed_Priming_For_Other_Formats() {
+        XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEG4AAC, sourceLength: 0, hasPacketTableInfo: false), 0)
     }
 }
