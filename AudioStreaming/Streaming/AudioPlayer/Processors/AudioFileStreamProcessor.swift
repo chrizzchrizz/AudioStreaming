@@ -819,7 +819,7 @@ final class AudioFileStreamProcessor {
                 notPlayedFrames,
                 usedFrames
             ))
-            droppedFrames = trailingSilentFrames(limit: limit)
+            droppedFrames = trailingSilentFrames(limit: limit, usedFrames: usedFrames)
         } else {
             return
         }
@@ -831,14 +831,16 @@ final class AudioFileStreamProcessor {
 
     /// Counts the silent frames at the end of the used renderer buffer.
     /// Must be called with the renderer lock held.
-    private func trailingSilentFrames(limit: Int) -> Int {
+    private func trailingSilentFrames(limit: Int, usedFrames: Int) -> Int {
         guard limit > 0, let mData = rendererContext.audioBuffer.mData else { return 0 }
         let bufferContext = rendererContext.bufferContext
         let total = Int(bufferContext.totalFrameCount)
         let end = Int(bufferContext.end)
         let channels = max(1, Int(outputAudioFormat.mChannelsPerFrame))
         let samples = mData.assumingMemoryBound(to: Float.self)
-        return GaplessTrim.trailingSilentFrames(limit: limit) { n in
+        // the music level comes from the frames before the ones that may be dropped
+        let referenceFrames = max(0, min(4096, usedFrames - limit))
+        return GaplessTrim.trailingSilentFrames(limit: limit, referenceFrames: referenceFrames) { n in
             let frame = (end - 1 - n + total) % total
             var peak: Float = 0
             for channel in 0 ..< channels {

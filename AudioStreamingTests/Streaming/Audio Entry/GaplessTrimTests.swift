@@ -104,17 +104,31 @@ class GaplessTrimTests: XCTestCase {
 
     func test_Trailing_Silent_Frames_Counts_Until_Signal() {
         let samples: [Float] = [0.5, 0.4, 0, 0.0005, 0, 0] // oldest to newest
-        let count = GaplessTrim.trailingSilentFrames(limit: 100) { samples[samples.count - 1 - $0] }
+        let count = GaplessTrim.trailingSilentFrames(limit: 100, referenceFrames: 0) { samples[samples.count - 1 - $0] }
         XCTAssertEqual(count, 4)
     }
 
     func test_Trailing_Silent_Frames_Is_Limited() {
-        let count = GaplessTrim.trailingSilentFrames(limit: 3) { _ in 0 }
+        let count = GaplessTrim.trailingSilentFrames(limit: 3, referenceFrames: 0) { _ in 0 }
         XCTAssertEqual(count, 3)
     }
 
     func test_Trailing_Silent_Frames_Zero_For_Signal_At_End() {
-        let count = GaplessTrim.trailingSilentFrames(limit: 100) { _ in 0.2 }
+        let count = GaplessTrim.trailingSilentFrames(limit: 100, referenceFrames: 0) { _ in 0.2 }
+        XCTAssertEqual(count, 0)
+    }
+
+    func test_Trailing_Decay_Is_Dropped_Relative_To_Loud_Music() {
+        // loud music (0.5), then a decaying tail below 2 % of it
+        let samples: [Float] = Array(repeating: 0.5, count: 50) + [0.008, 0.006, 0.004, 0.003]
+        let count = GaplessTrim.trailingSilentFrames(limit: 4, referenceFrames: 40) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, 4)
+    }
+
+    func test_Trailing_Quiet_Music_Is_Kept() {
+        // quiet music (0.02): 2 % of it is below the minimum, so only really silent frames are dropped
+        let samples: [Float] = Array(repeating: 0.02, count: 50) + [0.004, 0.004]
+        let count = GaplessTrim.trailingSilentFrames(limit: 2, referenceFrames: 40) { samples[samples.count - 1 - $0] }
         XCTAssertEqual(count, 0)
     }
 }
