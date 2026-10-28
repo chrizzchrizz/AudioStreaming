@@ -54,15 +54,26 @@ enum GaplessTrim {
     /// The most end padding an MP3 encoder adds (one frame plus the encoder delay), in source frames.
     static let maxAssumedMp3PaddingFrames = 1152 + 576
 
-    /// Below this peak level (about -60 dBFS) a frame counts as the silent padding of the encoder.
-    static let paddingSilenceThreshold: Float = 0.001
+    /// A frame at the end of the stream counts as padding below this fraction (-20 dB) of the peak level
+    /// of the music before it: the encoder padding is silence plus the ringing of the codec, which is
+    /// far below the music. At least `paddingSilenceMinimum`.
+    static let paddingRelativeThreshold: Float = 0.1
+    static let paddingSilenceMinimum: Float = 0.001
 
-    /// The silent frames at the end of a stream without padding info, to be dropped as padding.
-    /// - parameter peakFromEnd: The peak level of the frame `n` frames before the end (0 is the last frame)
+    /// The frames at the end of a stream without padding info that are silent or decaying
+    /// compared to the music before them, to be dropped as padding.
     /// - parameter limit: The most frames to drop
-    static func trailingSilentFrames(limit: Int, peakFromEnd: (Int) -> Float) -> Int {
+    /// - parameter referenceFrames: The number of frames before the dropped ones to take the music level from
+    /// - parameter peakFromEnd: The peak level of the frame `n` frames before the end (0 is the last frame)
+    static func trailingSilentFrames(limit: Int, referenceFrames: Int, peakFromEnd: (Int) -> Float) -> Int {
+        guard limit > 0 else { return 0 }
+        var reference: Float = 0
+        for n in limit ..< limit + max(0, referenceFrames) {
+            reference = max(reference, peakFromEnd(n))
+        }
+        let threshold = max(paddingSilenceMinimum, reference * paddingRelativeThreshold)
         var count = 0
-        while count < limit, peakFromEnd(count) < paddingSilenceThreshold {
+        while count < limit, peakFromEnd(count) < threshold {
             count += 1
         }
         return count
