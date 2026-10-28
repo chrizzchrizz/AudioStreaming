@@ -308,6 +308,7 @@ final class AudioFileStreamProcessor {
             assignMagicCookieToConverterIfNeeded()
             processPacketUpperBoundAndMaxPacketSize(entry: entry, fileStream: fileStream)
             processReadyToProducePackets(entry: entry, fileStream: fileStream)
+            applyAssumedPrimingIfNeeded(entry: entry)
         case kAudioFileStreamProperty_FormatList:
             processFormatList(entry: entry, fileStream: fileStream)
         case kAudioFileStreamProperty_PacketTableInfo:
@@ -357,13 +358,6 @@ final class AudioFileStreamProcessor {
 
             if entry.audioStreamFormat.mFormatID == 0 {
                 entry.audioStreamFormat = audioStreamFormat
-            }
-
-            // the packet table info (if any) is applied when it is reported and replaces this
-            if entry.framesState.validFrames == nil, entry.framesState.primingFrames == 0 {
-                entry.framesState.primingFrames = GaplessTrim.assumedPrimingFrames(
-                    formatID: audioStreamFormat.mFormatID, sourceLength: entry.length, hasPacketTableInfo: false
-                )
             }
 
             entry.sampleRate = Float(audioStreamFormat.mSampleRate)
@@ -428,6 +422,17 @@ final class AudioFileStreamProcessor {
         guard status == noErr else { return }
         entry.lock.lock(); defer { entry.lock.unlock() }
         entry.audioStreamState.bitRate = Double(bitRate)
+    }
+
+    /// An MP3 without packet table info (no Xing/Info header, e.g. a transcode of a server or a file
+    /// of a simple encoder) has the encoder delay of LAME at its start. The packet table info of a file
+    /// with header is reported before the stream is ready to produce packets and takes precedence.
+    private func applyAssumedPrimingIfNeeded(entry: AudioEntry) {
+        entry.lock.lock(); defer { entry.lock.unlock() }
+        guard entry.framesState.validFrames == nil, entry.framesState.primingFrames == 0 else { return }
+        entry.framesState.primingFrames = GaplessTrim.assumedPrimingFrames(
+            formatID: entry.audioStreamFormat.mFormatID, hasPacketTableInfo: false
+        )
     }
 
     private func processPacketTableInfo(entry: AudioEntry, fileStream: AudioFileStreamID) {
@@ -770,7 +775,7 @@ final class AudioFileStreamProcessor {
                 usedFrames: usedFrames
             )
         } else if framesState.validFrames == nil, framesState.primingFrames > 0 {
-            // padding assumed for a live MP3 stream: its length is unknown, drop the silence at the end
+            // padding of an MP3 without packet table info is unknown: drop the silence at the end
             let limit = max(0, min(
                 Int((Double(GaplessTrim.maxAssumedMp3PaddingFrames) * ratio).rounded()),
                 notPlayedFrames,
