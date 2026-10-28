@@ -54,10 +54,11 @@ enum GaplessTrim {
     /// The most end padding an MP3 encoder adds (one frame plus the encoder delay), in source frames.
     static let maxAssumedMp3PaddingFrames = 1152 + 576
 
-    /// A frame at the end of the stream counts as padding below this fraction (-20 dB) of the peak level
+    /// A frame at the end of the stream counts as padding below this fraction (-14 dB) of the peak level
     /// of the music before it: the encoder padding is silence plus the ringing of the codec, which is
-    /// far below the music. At least `paddingSilenceMinimum`.
-    static let paddingRelativeThreshold: Float = 0.1
+    /// about 20 dB below a music that ends abruptly and far below the music that follows. At least
+    /// `paddingSilenceMinimum`.
+    static let paddingRelativeThreshold: Float = 0.2
     static let paddingSilenceMinimum: Float = 0.001
 
     /// The frames at the end of a stream without padding info that are silent or decaying

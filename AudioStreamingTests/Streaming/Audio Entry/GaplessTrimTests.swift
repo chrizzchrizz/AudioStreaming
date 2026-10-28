@@ -131,4 +131,12 @@ class GaplessTrimTests: XCTestCase {
         let count = GaplessTrim.trailingSilentFrames(limit: 2, referenceFrames: 40) { samples[samples.count - 1 - $0] }
         XCTAssertEqual(count, 0)
     }
+
+    func test_Ringing_After_An_Abrupt_Music_End_Is_Dropped() {
+        // music at 0.4, then the ringing of the codec at about 0.04 and a noise floor, as measured on a live stream
+        let tail: [Float] = [0.044, 0.010, 0.041, 0.010, 0.036, 0.024, 0.006, 0.004]
+        let samples: [Float] = Array(repeating: 0.4, count: 50) + tail
+        let count = GaplessTrim.trailingSilentFrames(limit: 20, referenceFrames: 30) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, tail.count)
+    }
 }
