@@ -101,4 +101,20 @@ class GaplessTrimTests: XCTestCase {
     func test_No_Assumed_Priming_For_Other_Formats() {
         XCTAssertEqual(GaplessTrim.assumedPrimingFrames(formatID: kAudioFormatMPEG4AAC, sourceLength: 0, hasPacketTableInfo: false), 0)
     }
+
+    func test_Trailing_Silent_Frames_Counts_Until_Signal() {
+        let samples: [Float] = [0.5, 0.4, 0, 0.0005, 0, 0] // oldest to newest
+        let count = GaplessTrim.trailingSilentFrames(limit: 100) { samples[samples.count - 1 - $0] }
+        XCTAssertEqual(count, 4)
+    }
+
+    func test_Trailing_Silent_Frames_Is_Limited() {
+        let count = GaplessTrim.trailingSilentFrames(limit: 3) { _ in 0 }
+        XCTAssertEqual(count, 3)
+    }
+
+    func test_Trailing_Silent_Frames_Zero_For_Signal_At_End() {
+        let count = GaplessTrim.trailingSilentFrames(limit: 100) { _ in 0.2 }
+        XCTAssertEqual(count, 0)
+    }
 }

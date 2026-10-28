@@ -799,17 +799,53 @@ final class AudioFileStreamProcessor {
 
         let framesState = entry.framesState
         let sourceSampleRate = entry.audioStreamFormat.mSampleRate
-        guard framesState.decoded == nil, framesState.remainderFrames > 0, sourceSampleRate > 0 else { return }
-        let droppedFrames = GaplessTrim.trailingFramesToDrop(
-            remainderFrames: framesState.remainderFrames,
-            ratio: outputAudioFormat.mSampleRate / sourceSampleRate,
-            notPlayedFrames: framesState.queued - framesState.played,
-            usedFrames: Int(rendererContext.bufferContext.frameUsedCount)
-        )
+        guard sourceSampleRate > 0 else { return }
+        let ratio = outputAudioFormat.mSampleRate / sourceSampleRate
+        let notPlayedFrames = framesState.queued - framesState.played
+        let usedFrames = Int(rendererContext.bufferContext.frameUsedCount)
+        let droppedFrames: Int
+        if framesState.remainderFrames > 0 {
+            guard framesState.decoded == nil else { return }
+            droppedFrames = GaplessTrim.trailingFramesToDrop(
+                remainderFrames: framesState.remainderFrames,
+                ratio: ratio,
+                notPlayedFrames: notPlayedFrames,
+                usedFrames: usedFrames
+            )
+        } else if framesState.validFrames == nil, framesState.primingFrames > 0 {
+            // padding assumed for a live MP3 stream: its length is unknown, drop the silence at the end
+            let limit = max(0, min(
+                Int((Double(GaplessTrim.maxAssumedMp3PaddingFrames) * ratio).rounded()),
+                notPlayedFrames,
+                usedFrames
+            ))
+            droppedFrames = trailingSilentFrames(limit: limit)
+        } else {
+            return
+        }
         guard droppedFrames > 0 else { return }
 
         rendererContext.bufferContext.frameUsedCount -= UInt32(droppedFrames)
         framesState.queued -= droppedFrames
+    }
+
+    /// Counts the silent frames at the end of the used renderer buffer.
+    /// Must be called with the renderer lock held.
+    private func trailingSilentFrames(limit: Int) -> Int {
+        guard limit > 0, let mData = rendererContext.audioBuffer.mData else { return 0 }
+        let bufferContext = rendererContext.bufferContext
+        let total = Int(bufferContext.totalFrameCount)
+        let end = Int(bufferContext.end)
+        let channels = max(1, Int(outputAudioFormat.mChannelsPerFrame))
+        let samples = mData.assumingMemoryBound(to: Float.self)
+        return GaplessTrim.trailingSilentFrames(limit: limit) { n in
+            let frame = (end - 1 - n + total) % total
+            var peak: Float = 0
+            for channel in 0 ..< channels {
+                peak = max(peak, abs(samples[frame * channels + channel]))
+            }
+            return peak
+        }
     }
 
     /// Advances the processed frames for buffer and reading entry
