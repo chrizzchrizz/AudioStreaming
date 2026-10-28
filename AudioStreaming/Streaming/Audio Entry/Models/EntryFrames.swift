@@ -43,11 +43,10 @@ enum GaplessTrim {
     static let lameMp3PrimingFrames = 576
 
     /// The priming frames to assume for a stream without packet table info.
-    /// A live MP3 stream (no length, e.g. transcoded by the server on the fly) has no Xing/Info header,
-    /// so the decoder outputs the encoder delay as silence. MP3 files with a known length keep their
-    /// untrimmed behavior since their encoder is unknown.
-    static func assumedPrimingFrames(formatID: AudioFormatID, sourceLength: Int, hasPacketTableInfo: Bool) -> Int {
-        guard !hasPacketTableInfo, sourceLength <= 0, formatID == kAudioFormatMPEGLayer3 else { return 0 }
+    /// An MP3 without Xing/Info header (a live transcode, a cached transcode of a server, a file of a
+    /// simple encoder) gives no gapless info, so the decoder outputs the encoder delay as silence.
+    static func assumedPrimingFrames(formatID: AudioFormatID, hasPacketTableInfo: Bool) -> Int {
+        guard !hasPacketTableInfo, formatID == kAudioFormatMPEGLayer3 else { return 0 }
         return lameMp3PrimingFrames
     }
 
