@@ -61,7 +61,8 @@ let package = Package(
             resources: [
                 // Test resources for metadata stream processor tests
                 .copy("Streaming/Metadata Stream Processor/raw-audio-streams"),
-                .copy("Streaming/Mp4 Trailing Data/trailing-zero-padding.m4a")
+                .copy("Streaming/Mp4 Trailing Data/trailing-zero-padding.m4a"),
+                .copy("Streaming/Mp4 Restructure/moov-at-end.m4a")
             ]
         )
     ]
